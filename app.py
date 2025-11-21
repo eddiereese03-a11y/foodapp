@@ -11,8 +11,8 @@ st.set_page_config(
 # Initialize session state for credentials
 if 'credentials_set' not in st.session_state:
     st.session_state.credentials_set = False
-if 'supabase' not in st.session_state:
-    st.session_state.supabase = None
+if 'supabase_client' not in st.session_state:
+    st.session_state.supabase_client = None
 
 # Credentials Input Section
 if not st.session_state.credentials_set:
@@ -20,9 +20,9 @@ if not st.session_state.credentials_set:
     st.write("Enter your API credentials to get started")
     
     with st.form("credentials_form"):
-        supabase_url = st.text_input("Supabase URL", placeholder="https://selnutqegiwghipwludz.supabase.co")
-        supabase_key = st.text_input("sb_publishable_EBev4S20lHJldLdNR-7LmQ_IZMsUzEr", type="password")
-        spoonacular_key = st.text_input("3bf816f6a7a447f18c4f86ba5f56506f", type="password")
+        supabase_url = st.text_input("Supabase URL", placeholder="https://xxxxx.supabase.co")
+        supabase_key = st.text_input("Supabase Anon Key", type="password")
+        spoonacular_key = st.text_input("Spoonacular API Key", type="password")
         
         submitted = st.form_submit_button("Connect", type="primary")
         
@@ -30,26 +30,27 @@ if not st.session_state.credentials_set:
             if supabase_url and supabase_key and spoonacular_key:
                 try:
                     # Test Supabase connection
-                    supabase = create_client(supabase_url, supabase_key)
+                    test_client = create_client(supabase_url, supabase_key)
                     # Test query
-                    supabase.table("users").select("email").limit(1).execute()
+                    test_client.table("users").select("email").limit(1).execute()
                     
                     # Store in session state
-                    st.session_state.supabase = supabase
+                    st.session_state.supabase_client = test_client
                     st.session_state.spoonacular_key = spoonacular_key
                     st.session_state.credentials_set = True
                     st.success("✅ Connected successfully!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Connection failed: {str(e)}")
-                    st.info("Make sure your Supabase tables are created (see SQL below)")
+                    st.info("Make sure your Supabase tables exist and credentials are correct")
             else:
                 st.warning("Please fill in all credentials")
     
+    st.info("💡 Make sure you have created the 'users' and 'saved_recipes' tables in Supabase")
     st.stop()
 
 # Main App
-supabase = st.session_state.supabase
+supabase = st.session_state.supabase_client
 SPOONACULAR_API_KEY = st.session_state.spoonacular_key
 
 st.title("🥗 Budget-Friendly Healthy Meals")
@@ -58,7 +59,7 @@ st.write("Find delicious, healthy recipes that fit your budget!")
 # Add a settings button to reset credentials
 if st.sidebar.button("⚙️ Reset Credentials"):
     st.session_state.credentials_set = False
-    st.session_state.supabase = None
+    st.session_state.supabase_client = None
     st.rerun()
 
 # Sidebar for user information
@@ -76,7 +77,7 @@ with st.sidebar:
                 data = {
                     "email": email,
                     "zip_code": zip_code,
-                    "budget": budget
+                    "budget": float(budget)
                 }
                 response = supabase.table("users").upsert(data).execute()
                 st.success("✅ Profile saved!")
@@ -84,6 +85,7 @@ with st.sidebar:
                 st.session_state.user_budget = budget
             except Exception as e:
                 st.error(f"❌ Error saving profile: {str(e)}")
+                st.info("Tip: Check if your email already exists or verify table permissions")
         else:
             st.warning("Please fill in all fields")
     
@@ -132,7 +134,8 @@ with tab1:
             try:
                 response = requests.get(
                     "https://api.spoonacular.com/recipes/complexSearch",
-                    params=params
+                    params=params,
+                    timeout=10
                 )
                 
                 if response.status_code == 200:
@@ -145,7 +148,8 @@ with tab1:
                         cols = st.columns(3)
                         for idx, recipe in enumerate(recipes):
                             with cols[idx % 3]:
-                                st.image(recipe.get("image", ""), use_container_width=True)
+                                if recipe.get("image"):
+                                    st.image(recipe["image"], use_container_width=True)
                                 st.subheader(recipe["title"])
                                 
                                 # Recipe details
@@ -159,6 +163,7 @@ with tab1:
                                 # Get recipe details button
                                 if st.button(f"View Recipe", key=f"view_{recipe['id']}"):
                                     st.session_state.selected_recipe = recipe['id']
+                                    st.rerun()
                                 
                                 # Save recipe button
                                 if st.button(f"💾 Save", key=f"save_{recipe['id']}"):
@@ -166,28 +171,38 @@ with tab1:
                                         try:
                                             save_data = {
                                                 "user_email": st.session_state.user_email,
-                                                "recipe_id": recipe['id'],
+                                                "recipe_id": int(recipe['id']),
                                                 "recipe_title": recipe['title'],
                                                 "recipe_image": recipe.get('image', ''),
-                                                "price_per_serving": recipe.get('pricePerServing', 0) / 100
+                                                "price_per_serving": float(recipe.get('pricePerServing', 0) / 100)
                                             }
                                             supabase.table("saved_recipes").insert(save_data).execute()
                                             st.success("✅ Recipe saved!")
                                         except Exception as e:
-                                            st.error(f"❌ Error: {str(e)}")
+                                            error_msg = str(e)
+                                            if "duplicate" in error_msg.lower():
+                                                st.warning("⚠️ Recipe already saved!")
+                                            else:
+                                                st.error(f"❌ Error: {error_msg}")
                                     else:
                                         st.warning("⚠️ Please save your profile first")
                                 
                                 st.divider()
                     else:
                         st.info("No recipes found. Try adjusting your filters.")
+                elif response.status_code == 401:
+                    st.error("❌ Invalid API key. Please check your Spoonacular API key.")
+                elif response.status_code == 402:
+                    st.error("❌ Daily API limit reached. Try again tomorrow or upgrade your API plan.")
                 else:
                     st.error(f"❌ API Error: {response.status_code}")
-                    if response.status_code == 402:
-                        st.warning("Daily API limit reached. Try again tomorrow or upgrade your API plan.")
             
-            except Exception as e:
+            except requests.exceptions.Timeout:
+                st.error("❌ Request timed out. Please try again.")
+            except requests.exceptions.RequestException as e:
                 st.error(f"❌ Error fetching recipes: {str(e)}")
+            except Exception as e:
+                st.error(f"❌ Unexpected error: {str(e)}")
 
 with tab2:
     st.header("Your Saved Recipes")
@@ -212,11 +227,18 @@ with tab2:
                             st.image(recipe["recipe_image"], use_container_width=True)
                         st.subheader(recipe["recipe_title"])
                         st.write(f"💰 ${recipe.get('price_per_serving', 0):.2f} per serving")
-                        st.caption(f"Saved: {recipe.get('created_at', '')[:10]}")
+                        
+                        created_at = recipe.get('created_at', '')
+                        if created_at:
+                            st.caption(f"Saved: {created_at[:10]}")
                         
                         if st.button(f"🗑️ Remove", key=f"remove_{recipe['id']}"):
-                            supabase.table("saved_recipes").delete().eq("id", recipe['id']).execute()
-                            st.rerun()
+                            try:
+                                supabase.table("saved_recipes").delete().eq("id", recipe['id']).execute()
+                                st.success("✅ Recipe removed!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Error removing recipe: {str(e)}")
                         
                         st.divider()
             else:
@@ -233,7 +255,8 @@ if hasattr(st.session_state, 'selected_recipe'):
         try:
             recipe_response = requests.get(
                 f"https://api.spoonacular.com/recipes/{st.session_state.selected_recipe}/information",
-                params={"apiKey": SPOONACULAR_API_KEY}
+                params={"apiKey": SPOONACULAR_API_KEY},
+                timeout=10
             )
             
             if recipe_response.status_code == 200:
@@ -242,15 +265,17 @@ if hasattr(st.session_state, 'selected_recipe'):
                 col1, col2 = st.columns([1, 1])
                 
                 with col1:
-                    st.image(recipe_detail.get("image", ""))
+                    if recipe_detail.get("image"):
+                        st.image(recipe_detail["image"])
                 
                 with col2:
                     st.subheader(recipe_detail["title"])
-                    summary = recipe_detail.get("summary", "").replace("<b>", "**").replace("</b>", "**")
-                    # Remove HTML tags
-                    import re
-                    summary = re.sub('<[^<]+?>', '', summary)
-                    st.write(summary)
+                    summary = recipe_detail.get("summary", "")
+                    if summary:
+                        # Remove HTML tags
+                        import re
+                        summary = re.sub('<[^<]+?>', '', summary)
+                        st.write(summary)
                 
                 st.subheader("🥘 Ingredients")
                 for ingredient in recipe_detail.get("extendedIngredients", []):
@@ -269,7 +294,11 @@ if hasattr(st.session_state, 'selected_recipe'):
                 if st.button("❌ Close Details"):
                     del st.session_state.selected_recipe
                     st.rerun()
+            else:
+                st.error(f"❌ Error loading recipe: Status {recipe_response.status_code}")
         
+        except requests.exceptions.Timeout:
+            st.error("❌ Request timed out. Please try again.")
         except Exception as e:
             st.error(f"❌ Error loading recipe details: {str(e)}")
 

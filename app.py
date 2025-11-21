@@ -20,9 +20,9 @@ if not st.session_state.credentials_set:
     st.write("Enter your API credentials to get started")
     
     with st.form("credentials_form"):
-        supabase_url = st.text_input("Supabase URL", placeholder="https://xxxxx.supabase.co")
-        supabase_key = st.text_input("Supabase Anon Key", type="password")
-        spoonacular_key = st.text_input("Spoonacular API Key", type="password")
+        supabase_url = st.text_input("Supabase URL", placeholder="https://selnutqegiwghipwludz.supabase.co")
+        supabase_key = st.text_input("sb_publishable_EBev4S20lHJldLdNR-7LmQ_IZMsUzEr", type="password")
+        spoonacular_key = st.text_input("3bf816f6a7a447f18c4f86ba5f56506f", type="password")
         
         submitted = st.form_submit_button("Connect", type="primary")
         
